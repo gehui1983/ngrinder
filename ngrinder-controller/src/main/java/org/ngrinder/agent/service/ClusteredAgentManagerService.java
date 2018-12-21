@@ -20,12 +20,14 @@ import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import net.grinder.common.processidentity.AgentIdentity;
 import net.grinder.engine.controller.AgentControllerIdentityImplementation;
-import net.sf.ehcache.Ehcache;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.mutable.MutableInt;
 import org.ngrinder.agent.model.ClusteredAgentRequest;
-import org.ngrinder.infra.logger.CoreLogger;
-import org.ngrinder.infra.schedule.ScheduledTaskService;
+import org.ngrinder.infra.hazelcast.HazelcastService;
+import org.ngrinder.infra.hazelcast.task.InquireAgentStateTask;
+import org.ngrinder.infra.hazelcast.topic.listener.TopicListener;
+import org.ngrinder.infra.hazelcast.topic.message.TopicEvent;
+import org.ngrinder.infra.hazelcast.topic.subscriber.TopicSubscriber;
 import org.ngrinder.model.AgentInfo;
 import org.ngrinder.model.User;
 import org.ngrinder.monitor.controller.model.SystemDataModel;
@@ -33,10 +35,6 @@ import org.ngrinder.region.service.RegionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cache.Cache;
-import org.springframework.cache.Cache.ValueWrapper;
-import org.springframework.cache.CacheManager;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Nullable;
@@ -48,9 +46,8 @@ import java.util.Set;
 import static net.grinder.message.console.AgentControllerState.INACTIVE;
 import static net.grinder.message.console.AgentControllerState.WRONG_REGION;
 import static org.ngrinder.agent.model.ClusteredAgentRequest.RequestType.*;
-import static org.ngrinder.agent.repository.AgentManagerSpecification.active;
-import static org.ngrinder.agent.repository.AgentManagerSpecification.visible;
-import static org.ngrinder.agent.repository.AgentManagerSpecification.ready;
+import static org.ngrinder.agent.repository.AgentManagerSpecification.*;
+import static org.ngrinder.common.constant.CacheConstants.AGENT_EXECUTOR_SERVICE;
 import static org.ngrinder.common.util.CollectionUtils.newArrayList;
 import static org.ngrinder.common.util.CollectionUtils.newHashMap;
 import static org.ngrinder.common.util.TypeConvertUtils.cast;
@@ -61,23 +58,42 @@ import static org.ngrinder.common.util.TypeConvertUtils.cast;
  * @author JunHo Yoon
  * @since 3.1
  */
-public class ClusteredAgentManagerService extends AgentManagerService {
-	private static final Logger LOGGER = LoggerFactory.getLogger(ClusteredAgentManagerService.class);
+public class ClusteredAgentManagerService extends AgentManagerService implements TopicListener<ClusteredAgentRequest> {
+	private final Logger LOGGER = LoggerFactory.getLogger(ClusteredAgentManagerService.class);
+
+/*	@Autowired
+	private CacheManager cacheManager;*/
 
 	@Autowired
-	CacheManager cacheManager;
+	private TopicSubscriber topicSubscriber;
 
-	private Cache agentRequestCache;
-
-	private Cache agentMonitoringTargetsCache;
-
+	@Autowired
+	private HazelcastService hazelcastService;
 
 	@Autowired
 	private RegionService regionService;
 
+	private final String TOPIC_LISTENER_FOR_AGENT_KEY = "AGENT";
+
+/*	private Cache agentRequestCache;
+
+	private Cache agentMonitoringTargetsCache;*/
+
+
 	/**
 	 * Initialize.
 	 */
+	@PostConstruct
+	public void init() {
+		super.init();
+		if (getConfig().isClustered()) {
+			topicSubscriber.addListener(TOPIC_LISTENER_FOR_AGENT_KEY, this);
+		}
+	}
+
+/*	*//**
+	 * Initialize.
+	 *//*
 	@PostConstruct
 	public void init() {
 		super.init();
@@ -116,12 +132,12 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 				}
 			}, 3000);
 		}
-	}
+	}*/
 
 	@Override
 	public void checkAgentStatePeriodically() {
 		super.checkAgentStatePeriodically();
-		collectAgentSystemData();
+		// collectAgentSystemData();
 	}
 
 	/**
@@ -201,9 +217,9 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 
 	private Gson gson = new Gson();
 
-	/**
+/*	*//**
 	 * Collect the agent system info every second.
-	 */
+	 *//*
 	public void collectAgentSystemData() {
 		if (agentMonitoringTargetsCache == null) {
 			return;
@@ -224,9 +240,9 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 				}
 			}
 		}
-	}
+	}*/
 
-	public void updateSystemStat(final AgentControllerIdentityImplementation agentIdentity) {
+/*	public void updateSystemStat(final AgentControllerIdentityImplementation agentIdentity) {
 		cachedLocalAgentService.doSthInTransaction(new Runnable() {
 			public void run() {
 				agentManagerRepository.updateSystemStat(agentIdentity.getIp(),
@@ -234,7 +250,7 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 						gson.toJson(getSystemDataModel(agentIdentity)));
 			}
 		});
-	}
+	}*/
 
 	private SystemDataModel getSystemDataModel(AgentIdentity agentIdentity) {
 		return getAgentManager().getSystemDataModel(agentIdentity);
@@ -334,12 +350,22 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 		}
 	}
 
-	@Override
+/*	@Override
 	public AgentInfo approve(Long id, boolean approve) {
 		AgentInfo agent = super.approve(id, approve);
 		if (agent != null) {
 			agentRequestCache.put(extractRegionFromAgentRegion(agent.getRegion()) + "|" + createKey(agent),
 					new ClusteredAgentRequest(agent.getIp(), agent.getName(), EXPIRE_LOCAL_CACHE));
+		}
+		return agent;
+	}*/
+
+	@Override
+	public AgentInfo approve(Long id, boolean approve) {
+		AgentInfo agent = super.approve(id, approve);
+		if (agent != null) {
+			hazelcastService.publish(new TopicEvent<>(TOPIC_LISTENER_FOR_AGENT_KEY,
+				extractRegionFromAgentRegion(agent.getRegion()), new ClusteredAgentRequest(agent.getIp(), agent.getName(), EXPIRE_LOCAL_CACHE)));
 		}
 		return agent;
 	}
@@ -356,15 +382,25 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 		if (agent == null) {
 			return;
 		}
-		agentRequestCache.put(extractRegionFromAgentRegion(agent.getRegion()) + "|" + createKey(agent),
-				new ClusteredAgentRequest(agent.getIp(), agent.getName(), STOP_AGENT));
+		hazelcastService.publish(new TopicEvent<>(TOPIC_LISTENER_FOR_AGENT_KEY,
+			extractRegionFromAgentRegion(agent.getRegion()), new ClusteredAgentRequest(agent.getIp(), agent.getName(), STOP_AGENT)));
 	}
 
-	/**
+/*	@Override
+	public void stopAgent(Long id) {
+		AgentInfo agent = getOne(id);
+		if (agent == null) {
+			return;
+		}
+		agentRequestCache.put(extractRegionFromAgentRegion(agent.getRegion()) + "|" + createKey(agent),
+				new ClusteredAgentRequest(agent.getIp(), agent.getName(), STOP_AGENT));
+	}*/
+
+/*	*//**
 	 * Add the agent system data model share request on cache.
 	 *
 	 * @param id agent id in db.
-	 */
+	 *//*
 	@Override
 	public void requestShareAgentSystemDataModel(Long id) {
 		AgentInfo agent = getOne(id);
@@ -373,7 +409,7 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 		}
 		agentRequestCache.put(extractRegionFromAgentRegion(agent.getRegion()) + "|" + createKey(agent),
 				new ClusteredAgentRequest(agent.getIp(), agent.getName(), SHARE_AGENT_SYSTEM_DATA_MODEL));
-	}
+	}*/
 
 	/**
 	 * Get the agent system data model for the given IP. This method is cluster
@@ -384,22 +420,26 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 	 * @return {@link SystemDataModel} instance.
 	 */
 	@Override
+	public SystemDataModel getSystemDataModel(String ip, String name, String region) {
+		return hazelcastService.submitToRegion(AGENT_EXECUTOR_SERVICE, new InquireAgentStateTask(ip, name), region);
+	}
+/*	@Override
 	public SystemDataModel getSystemDataModel(String ip, String name) {
 		AgentInfo found = agentManagerRepository.findByIpAndHostName(ip, name);
 		String systemStat = (found == null) ? null : found.getSystemStat();
 		return (StringUtils.isEmpty(systemStat)) ? new SystemDataModel() : gson.fromJson(systemStat,
 				SystemDataModel.class);
-	}
+	}*/
 
-	/**
+/*	*//**
 	 * Register agent monitoring target. This method should be called in the
 	 * controller in which the given agent exists.
 	 *
 	 * @param agentIdentity agent identity
-	 */
+	 *//*
 	public void addAgentMonitoringTarget(AgentControllerIdentityImplementation agentIdentity) {
 		agentMonitoringTargetsCache.put(createKey(agentIdentity), agentIdentity);
-	}
+	}*/
 
 	/**
 	 * Stop agent.
@@ -421,9 +461,18 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 		if (agent == null) {
 			return;
 		}
+		hazelcastService.publish(new TopicEvent<>(TOPIC_LISTENER_FOR_AGENT_KEY,
+			extractRegionFromAgentRegion(agent.getRegion()), new ClusteredAgentRequest(agent.getIp(), agent.getName(), UPDATE_AGENT)));
+	}
+/*	@Override
+	public void update(Long id) {
+		AgentInfo agent = getOne(id);
+		if (agent == null) {
+			return;
+		}
 		agentRequestCache.put(extractRegionFromAgentRegion(agent.getRegion()) + "|" + createKey(agent),
 				new ClusteredAgentRequest(agent.getIp(), agent.getName(), UPDATE_AGENT));
-	}
+	}*/
 
 	/**
 	 * Clean up the agents from db which belongs to the inactive regions.
@@ -435,6 +484,21 @@ public class ClusteredAgentManagerService extends AgentManagerService {
 		for (AgentInfo each : agentManagerRepository.findAll()) {
 			if (!regions.contains(extractRegionFromAgentRegion(each.getRegion()))) {
 				agentManagerRepository.delete(each);
+			}
+		}
+	}
+
+	@Override
+	public void execute(TopicEvent<ClusteredAgentRequest> event) {
+		ClusteredAgentRequest agentRequest = event.getData();
+		if (agentRequest.getRequestType().equals(EXPIRE_LOCAL_CACHE)) {
+			expireLocalCache();
+		} else {
+			if (event.getKey().equals(getConfig().getRegion())) {
+				AgentControllerIdentityImplementation agentIdentity = getAgentIdentityByIpAndName(agentRequest.getAgentIp(), agentRequest.getAgentName());
+				if (agentIdentity != null) {
+					agentRequest.getRequestType().process(ClusteredAgentManagerService.this, agentIdentity);
+				}
 			}
 		}
 	}

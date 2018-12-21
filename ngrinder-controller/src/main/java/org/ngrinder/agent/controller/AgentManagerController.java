@@ -176,8 +176,8 @@ public class AgentManagerController extends BaseController {
 	@PreAuthorize("hasAnyRole('A')")
 	@RequestMapping("/api/{id}/state")
 	public HttpEntity<String> getState(@PathVariable Long id, @RequestParam String ip, @RequestParam String name) {
-		agentManagerService.requestShareAgentSystemDataModel(id);
-		return toJsonHttpEntity(agentManagerService.getSystemDataModel(ip, name));
+		// agentManagerService.requestShareAgentSystemDataModel(id);
+		return toJsonHttpEntity(agentManagerService.getSystemDataModel(ip, name, null));
 	}
 
 	/**

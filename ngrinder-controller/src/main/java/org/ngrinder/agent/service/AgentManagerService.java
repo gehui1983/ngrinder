@@ -440,7 +440,7 @@ public class AgentManagerService extends AbstractAgentManagerService {
 	 * (java.lang.String, java.lang.String)
 	 */
 	@Override
-	public SystemDataModel getSystemDataModel(String ip, String name) {
+	public SystemDataModel getSystemDataModel(String ip, String name, String region) {
 		AgentControllerIdentityImplementation agentIdentity = getAgentIdentityByIpAndName(ip, name);
 		return agentIdentity != null ? getAgentManager().getSystemDataModel(agentIdentity) : new SystemDataModel();
 	}
